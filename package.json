@@ -1,0 +1,8 @@
+{
+  "name": "quiz-site",
+  "version": "2.1.0",
+  "private": true,
+  "description": "موقع أسئلة يعمل بالكامل محليًا (بدون MongoDB)",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

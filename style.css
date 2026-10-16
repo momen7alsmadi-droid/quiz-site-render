@@ -1,0 +1,62 @@
+:root{
+  --bg:#f4efe6; --card:#fffdf8; --ink:#2b2a28; --muted:#7a7468; --line:#dcd3c1;
+  --accent:#1f5f5b; --accent-d:#174844; --warm:#b4532a;
+  --ok:#2e7d4f; --ok-bg:#dcefe2; --bad:#b3261e; --bad-bg:#f7dedb;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Tajawal",Tahoma,Arial,sans-serif;font-size:17px;line-height:1.7;min-height:100vh}
+main{max-width:640px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:22px;margin:0 0 14px}
+.muted{color:var(--muted)}
+.center{text-align:center}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:22px;margin-bottom:16px}
+.stack>*+*{margin-top:12px}
+label{display:block;font-weight:500;margin-bottom:4px}
+input[type=text],input[type=password],input[type=number]{
+  width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:inherit}
+input:focus{outline:2px solid var(--accent);outline-offset:0}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;padding:11px 18px;transition:background .15s}
+button:hover{background:var(--accent-d)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;color:var(--accent)}
+button.ghost:hover{background:#e9e2d2}
+button.warm{background:var(--warm);border-color:var(--warm)}
+button.big{width:100%;padding:16px;font-size:19px}
+button.link{background:none;border:none;color:var(--accent);text-decoration:underline;padding:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1}
+.err{color:var(--bad);background:var(--bad-bg);border-radius:8px;padding:10px 12px}
+.okmsg{color:var(--ok);background:var(--ok-bg);border-radius:8px;padding:10px 12px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:#fff;color:var(--ink);border:1px solid var(--line);padding:8px 16px;flex:0 0 auto}
+.chip:hover{background:#efe8d8}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;text-align:center}
+.stat b{display:block;font-size:24px}
+.stat span{color:var(--muted);font-size:14px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px;font-weight:500}
+.topbar .pill{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:4px 14px}
+.qtext{font-size:21px;font-weight:500;margin:0 0 18px}
+.opt{display:flex;gap:12px;align-items:center;width:100%;text-align:right;background:#fff;color:var(--ink);border:1px solid var(--line);margin-bottom:9px;padding:12px 14px}
+.opt:hover:not(:disabled){background:#f1ead9}
+.opt .ltr{flex:0 0 28px;height:28px;border-radius:50%;background:#efe8d8;display:grid;place-items:center;font-size:14px;color:var(--muted)}
+.opt.ok{background:var(--ok-bg);border-color:var(--ok);color:#14502c;opacity:1}
+.opt.bad{background:var(--bad-bg);border-color:var(--bad);color:#7d1913;opacity:1}
+.opt:disabled{opacity:1;cursor:default}
+.tline{min-height:26px;color:var(--muted);margin:6px 0 12px}
+.bar{height:6px;background:#e7dfcd;border-radius:4px;overflow:hidden;margin-bottom:16px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:15px;min-width:560px}
+th,td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:center;white-space:nowrap}
+th{color:var(--muted);font-weight:500;background:#f1ead9}
+td.nm,th.nm{text-align:right}
+tr.me td{background:#e8f1ee;font-weight:700}
+.fails{max-height:180px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:15px}
+.progress{height:10px;background:#e7dfcd;border-radius:6px;overflow:hidden}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.small{font-size:14px}

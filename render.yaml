@@ -1,0 +1,10 @@
+# النشر كموقع ثابت (Static Site): مجاني ولا ينام ولا يحتاج بينق
+services:
+  - type: web
+    name: quiz-site
+    runtime: static
+    staticPublishPath: .
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
