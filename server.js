@@ -7,6 +7,7 @@ const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
+const MIN_QUESTIONS = 10; // أقل عدد أسئلة للظهور في الترتيب
 const IMPORT_PASSWORD = process.env.IMPORT_PASSWORD || "2580";
 const PUBLIC = new Set(["index.html", "app.js", "style.css", "namozaj-asila.xlsx"]);
 const TYPES = {
@@ -196,16 +197,44 @@ async function handle(route, params, method, body) {
       if (!a) agg.set(r.userId, (a = { userId: r.userId, name: usr.firstName + " " + usr.lastName, sessions: 0, total: 0, correct: 0, timeMs: 0 }));
       a.sessions++; a.total += r.answered; a.correct += r.correct; a.timeMs += r.totalTimeMs;
     }
-    const list = [...agg.values()]
-      .map((r) => ({
+    // نظام التقييم: 85 نقطة للدقة الموثوقة (حد ويلسون الأدنى بثقة 95%) + 15 نقطة للسرعة مضروبة في الدقة.
+    // لا يُرتَّب إلا من أجاب MIN_QUESTIONS سؤالًا على الأقل.
+    const Z = 1.96;
+    const wilson = (c, n) => {
+      if (!n) return 0;
+      const p = c / n;
+      const d = 1 + (Z * Z) / n;
+      const centre = p + (Z * Z) / (2 * n);
+      const margin = Z * Math.sqrt((p * (1 - p)) / n + (Z * Z) / (4 * n * n));
+      return Math.max(0, (centre - margin) / d);
+    };
+    const all = [...agg.values()].map((r) => {
+      const acc = r.total ? r.correct / r.total : 0;
+      const avgMs = r.total ? r.timeMs / r.total : 0;
+      // السرعة: 5 ثوانٍ أو أقل = كاملة، 60 ثانية أو أكثر = صفر
+      const speed = Math.min(1, Math.max(0, (60000 - avgMs) / 55000));
+      const score = 85 * wilson(r.correct, r.total) + 15 * speed * acc;
+      return {
         userId: r.userId, name: r.name, sessions: r.sessions, total: r.total, correct: r.correct,
         wrong: r.total - r.correct,
-        accuracy: r.total ? Math.round((r.correct / r.total) * 1000) / 10 : 0,
-        avgMs: r.total ? Math.round(r.timeMs / r.total) : 0,
-      }))
-      .sort((a, b) => b.correct - a.correct || b.accuracy - a.accuracy)
-      .slice(0, 100);
-    return { list };
+        accuracy: Math.round(acc * 1000) / 10,
+        avgMs: Math.round(avgMs),
+        score: Math.round(score * 10) / 10,
+        _s: score,
+      };
+    });
+    const ranked = all
+      .filter((r) => r.total >= MIN_QUESTIONS)
+      .sort((a, b) => b._s - a._s || b.correct - a.correct || a.avgMs - b.avgMs || a.name.localeCompare(b.name));
+    // تعادل حقيقي في كل المعايير = نفس المركز
+    let prev = null;
+    ranked.forEach((r, i) => {
+      r.rank = prev && prev.score === r.score && prev.correct === r.correct && prev.avgMs === r.avgMs ? prev.rank : i + 1;
+      prev = r;
+    });
+    const pending = all.filter((r) => r.total < MIN_QUESTIONS).sort((a, b) => b.total - a.total);
+    const list = ranked.slice(0, 100).concat(pending.slice(0, 50)).map((r) => { delete r._s; return r; });
+    return { list, minQuestions: MIN_QUESTIONS };
   }
 
   throw new HttpError(404, "المسار غير موجود");

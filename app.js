@@ -205,6 +205,13 @@
 
   function renderQuestion() {
     const q = S.qs[S.i];
+    // ترتيب عشوائي جديد للخيارات الخمسة في كل مرة يُعرض فيها السؤال (Fisher–Yates)
+    const order = [0, 1, 2, 3, 4].slice(0, q.options.length);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    S.order = order; // order[موضع معروض] = فهرس الخيار الأصلي
     const left = S.qs.length - S.i;
     const pct = (S.i / S.qs.length) * 100;
     const keepTimer = timerHandle;
@@ -217,7 +224,7 @@
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="card">
         <p class="qtext">${esc(q.q)}</p>
-        <div id="opts">${q.options.map((o, k) => `<button class="opt" data-k="${k}"><span class="ltr">${LETTERS[k]}</span><span>${esc(o)}</span></button>`).join("")}</div>
+        <div id="opts">${order.map((orig, k) => `<button class="opt" data-k="${k}"><span class="ltr">${LETTERS[k]}</span><span>${esc(q.options[orig])}</span></button>`).join("")}</div>
         <div class="tline" id="tl"></div>
         <button class="big" id="next" disabled>${S.i + 1 === S.qs.length ? "عرض النتيجة" : "التالي"}</button>
       </div>`;
@@ -241,13 +248,13 @@
     S.locked = true;
     const took = performance.now() - S.qStart;
     const q = S.qs[S.i];
-    const ok = k + 1 === q.correct;
+    const ok = S.order[k] === q.correct - 1;
     S.answered++;
     if (ok) S.correct++;
     const btns = document.querySelectorAll(".opt");
     btns.forEach((b) => (b.disabled = true));
     btns[k].classList.add(ok ? "ok" : "bad");
-    if (!ok) btns[q.correct - 1].classList.add("ok");
+    if (!ok) btns[S.order.indexOf(q.correct - 1)].classList.add("ok");
     $("tl").textContent = `استغرقت ${fmtSec(took)} ثانية في هذا السؤال`;
     $("next").disabled = false;
   }
@@ -293,19 +300,30 @@
   async function viewBoard() {
     show('<p class="muted center">جارٍ التحميل…</p>');
     try {
-      const { list } = await api("/leaderboard");
-      const rows = list.map((r, i) => `
+      const { list, minQuestions: minQ } = await api("/leaderboard");
+      const medal = (n) => (n === 1 ? "🥇" : n === 2 ? "🥈" : n === 3 ? "🥉" : nf(n));
+      const rowHtml = (r) => `
         <tr class="${r.userId === user.id ? "me" : ""}">
-          <td>${nf(i + 1)}</td><td class="nm">${esc(r.name)}</td>
-          <td>${nf(r.total)}</td><td>${nf(r.correct)}</td><td>${nf(r.wrong)}</td>
-          <td>${nf(r.accuracy)}٪</td><td>${(r.avgMs / 1000).toFixed(1)} ث</td>
-        </tr>`).join("");
+          <td>${r.rank ? medal(r.rank) : "—"}</td><td class="nm">${esc(r.name)}</td>
+          <td><b>${r.rank ? nf(r.score) : "—"}</b></td>
+          <td>${nf(r.accuracy)}٪</td><td>${nf(r.correct)} / ${nf(r.total)}</td>
+          <td>${(r.avgMs / 1000).toFixed(1)} ث</td>
+        </tr>`;
+      const table = (rows) => `<div class="tablewrap"><table>
+            <thead><tr><th>#</th><th class="nm">الاسم</th><th>النقاط</th><th>الدقة</th><th>صحيحة / أسئلة</th><th>متوسط السرعة</th></tr></thead>
+            <tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`;
+      const ranked = list.filter((r) => r.rank);
+      const pending = list.filter((r) => !r.rank);
       show(`
         <h2>لوحة الصدارة</h2>
-        <div class="card">
-          ${list.length ? `<div class="tablewrap"><table>
-            <thead><tr><th>#</th><th class="nm">الاسم</th><th>الأسئلة</th><th>صحيحة</th><th>خاطئة</th><th>النسبة</th><th>متوسط السرعة</th></tr></thead>
-            <tbody>${rows}</tbody></table></div>` : '<p class="muted center">لا توجد نتائج بعد. كن أول من يحل الأسئلة!</p>'}
+        <div class="card stack">
+          ${ranked.length ? table(ranked) : '<p class="muted center">لا يوجد متسابقون مؤهلون بعد. أجب عن ' + nf(minQ) + ' سؤالًا على الأقل لتظهر في الترتيب.</p>'}
+          ${pending.length ? `<h3 style="margin:8px 0 0">قيد التأهّل (أقل من ${nf(minQ)} سؤالًا)</h3>${table(pending)}` : ""}
+          <p class="muted" style="font-size:13px;line-height:1.8;margin:0">
+            <b>كيف تُحسب النقاط؟</b> من 100: ٨٥ نقطة للدقة الموثوقة و١٥ نقطة للسرعة.
+            الدقة الموثوقة تأخذ عدد الأسئلة في الحسبان، فمن أجاب ٩٠٪ من ٢٠٠ سؤال يتقدّم على من أجاب ١٠٠٪ من ١٠ أسئلة فقط، لأن النتيجة الأكبر أصدق وأقل احتمالًا للحظ.
+            السرعة تُحتسب بمقدار دقتك، فلا فائدة من التخمين السريع. عند التعادل: الأكثر إجابات صحيحة ثم الأسرع.
+          </p>
         </div>
         <button class="ghost" id="b">رجوع</button>`);
       $("b").onclick = viewHome;
