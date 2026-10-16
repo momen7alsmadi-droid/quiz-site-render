@@ -1,10 +1,13 @@
-# النشر كموقع ثابت (Static Site): مجاني ولا ينام ولا يحتاج بينق
 services:
   - type: web
     name: quiz-site
-    runtime: static
-    staticPublishPath: .
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: no-cache
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: IMPORT_PASSWORD
+        value: "2580"

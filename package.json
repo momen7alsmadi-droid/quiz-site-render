@@ -1,8 +1,9 @@
 {
   "name": "quiz-site",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "موقع أسئلة يعمل بالكامل محليًا (بدون MongoDB)",
+  "description": "موقع أسئلة بقاعدة بيانات مشتركة (MongoDB Atlas)",
   "scripts": { "start": "node server.js" },
+  "dependencies": { "mongodb": "^6.8.0" },
   "engines": { "node": ">=18" }
 }

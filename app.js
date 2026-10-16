@@ -34,9 +34,26 @@
     }
   }
 
-  // كل البيانات تُحفظ محليًا في المتصفح عبر localdb.js (بدون خادم وبدون MongoDB)
+  // كل البيانات تُحفظ على الخادم (مشتركة بين كل الأجهزة)
   async function api(path, body) {
-    return window.LocalAPI.request(path, body);
+    let res;
+    try {
+      res = await fetch("/api" + path, body
+        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+        : { method: "GET" });
+    } catch (e) {
+      const err = new Error("تعذّر الاتصال بالخادم. تأكد من الإنترنت وحاول مرة أخرى (قد يحتاج الخادم نصف دقيقة ليستيقظ).");
+      err.status = 0;
+      throw err;
+    }
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const err = new Error(data.error || "خطأ في الخادم");
+      err.status = res.status;
+      throw err;
+    }
+    return data;
   }
 
   function fmtTime(ms) {
