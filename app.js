@@ -382,34 +382,47 @@
     show(`
       <h2>إضافة أسئلة</h2>
       <div class="card stack">
-        <p style="margin:0">ارفع ملف إكسل (‎.xlsx‎) بالصيغة التالية: العمود الأول السؤال، ثم خمسة أعمدة للخيارات، ثم رقم الإجابة الصحيحة (من 1 إلى 5).</p>
+        <p style="margin:0">ارفع ملف إكسل واحدًا أو عدة ملفات دفعة واحدة (‎.xlsx‎، بلا حد لعدد الملفات) بالصيغة التالية: العمود الأول السؤال، ثم خمسة أعمدة للخيارات، ثم رقم الإجابة الصحيحة (من 1 إلى 5).</p>
         <p style="margin:0"><a href="namozaj-asila.xlsx" download>تحميل ملف نموذجي</a></p>
-        <input type="file" id="file" accept=".xlsx,.xls">
+        <input type="file" id="file" accept=".xlsx,.xls" multiple>
         <div id="out" class="stack"></div>
       </div>
       <button class="ghost" id="b">رجوع</button>`);
     $("b").onclick = viewHome;
     $("file").onchange = async (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
       const out = $("out");
-      out.innerHTML = '<p class="muted">جارٍ قراءة الملف…</p>';
-      await new Promise((r) => setTimeout(r, 30));
-      let res;
-      try {
-        res = parseWorkbook(await f.arrayBuffer());
-      } catch (err) {
-        out.innerHTML = '<div class="err">تعذّرت قراءة الملف. تأكد أنه ملف إكسل سليم.</div>';
-        return;
+      const good = [];
+      const bad = [];
+      const perFile = [];
+      let total = 0;
+      // نقرأ كل الملفات المحددة واحدًا تلو الآخر مهما كان عددها
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        out.innerHTML = `<p class="muted">جارٍ قراءة الملف ${nf(i + 1)} من ${nf(files.length)}: ${esc(f.name)}…</p>`;
+        await new Promise((r) => setTimeout(r, 20));
+        try {
+          const res = parseWorkbook(await f.arrayBuffer());
+          total += res.total;
+          for (const g of res.good) good.push(g);
+          for (const x of res.bad) bad.push(Object.assign({ file: f.name }, x));
+          perFile.push({ name: f.name, total: res.total, ok: res.good.length, bad: res.bad.length, err: "" });
+        } catch (err) {
+          perFile.push({ name: f.name, total: 0, ok: 0, bad: 0, err: "تعذّرت قراءة الملف (تأكد أنه ملف إكسل سليم)" });
+        }
       }
-      const { total, good, bad } = res;
+      const multi = files.length > 1;
       out.innerHTML = `
         <div class="stats">
-          <div class="stat"><b>${nf(total)}</b><span>عدد الأسئلة في الملف</span></div>
+          <div class="stat"><b>${nf(total)}</b><span>عدد الأسئلة${multi ? " في كل الملفات" : " في الملف"}</span></div>
           <div class="stat"><b style="color:var(--ok)">${nf(good.length)}</b><span>صالحة للحفظ</span></div>
           <div class="stat"><b style="color:var(--bad)">${nf(bad.length)}</b><span>فيها خطأ (لن تُحفظ)</span></div>
         </div>
-        ${bad.length ? `<div class="fails">${bad.slice(0, 50).map((b) => `الصف ${nf(b.row)}: ${esc(b.reason)}`).join("<br>")}${bad.length > 50 ? `<br>… و${nf(bad.length - 50)} صفًا آخر` : ""}</div>` : ""}
+        ${multi ? `<div class="tablewrap"><table style="min-width:0">
+          <thead><tr><th class="nm">الملف</th><th>أسئلة</th><th>صالحة</th><th>خطأ</th></tr></thead>
+          <tbody>${perFile.map((p) => `<tr><td class="nm">${esc(p.name)}${p.err ? `<br><span class="err">${esc(p.err)}</span>` : ""}</td><td>${nf(p.total)}</td><td>${nf(p.ok)}</td><td>${nf(p.bad)}</td></tr>`).join("")}</tbody></table></div>` : (perFile[0] && perFile[0].err ? `<div class="err">${esc(perFile[0].err)}</div>` : "")}
+        ${bad.length ? `<div class="fails">${bad.slice(0, 50).map((b) => `${multi ? esc(b.file) + " — " : ""}الصف ${nf(b.row)}: ${esc(b.reason)}`).join("<br>")}${bad.length > 50 ? `<br>… و${nf(bad.length - 50)} صفًا آخر` : ""}</div>` : ""}
         ${good.length ? `
           <div><label for="pw">كلمة المرور لحفظ الأسئلة</label><input id="pw" type="password" inputmode="numeric" autocomplete="off"></div>
           <div id="msg"></div>
@@ -451,7 +464,7 @@
     $("msg").innerHTML = `
       <div class="${errFail ? "err" : "okmsg"}">اكتملت العملية.</div>
       <div class="stats" style="margin-top:10px">
-        <div class="stat"><b>${nf(total)}</b><span>أسئلة في الملف</span></div>
+        <div class="stat"><b>${nf(total)}</b><span>أسئلة في الملفات</span></div>
         <div class="stat"><b style="color:var(--ok)">${nf(inserted)}</b><span>نجح حفظها</span></div>
         <div class="stat"><b style="color:var(--bad)">${nf(failed)}</b><span>فشل حفظها</span></div>
       </div>
