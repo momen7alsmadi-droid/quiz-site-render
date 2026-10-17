@@ -27,6 +27,17 @@ const isInt = (v) => Number.isInteger(v);
 const cleanStr = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const validDevice = (id) => typeof id === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(id);
 const normKey = (q) => q.replace(/\s+/g, " ").trim().toLowerCase();
+// مفتاح الاسم: يوحّد الاختلافات الإملائية الشائعة (أ/إ/آ، ى/ي، ة/ه، التشكيل، حالة الأحرف) حتى لا يتشابه اسمان عمليًا
+const nameKey = (f, l) =>
+  [f, l]
+    .map((s) =>
+      s.normalize("NFKC").toLowerCase()
+        .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+        .replace(/[أإآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+    )
+    .join("|");
+const HAS_SPACE = /[\s\u200B-\u200F\u2060\uFEFF]/;
+const NAME_TAKEN = "هذا الاسم مستخدم من قبل شخص آخر. غيّر الاسم الأول أو اسم العائلة ليصبح مختلفًا.";
 const userOut = (u) => ({ id: u.id, firstName: u.firstName, lastName: u.lastName });
 
 // ---------------- التخزين ----------------
@@ -41,11 +52,22 @@ class MongoStore {
     this.r = db.collection("results");
     await this.q.createIndex({ key: 1 }, { unique: true });
     await this.u.createIndex({ deviceId: 1 }, { unique: true });
+    await this.u.createIndex({ nameKey: 1 }, { unique: true, partialFilterExpression: { nameKey: { $type: "string" } } });
     await this.r.createIndex({ userId: 1 });
+    this.s = db.collection("seen");
+    await this.s.createIndex({ userId: 1, qid: 1 }, { unique: true });
   }
+  async seenIds(userId) { return (await this.s.find({ userId }, { projection: { _id: 0, qid: 1 } }).toArray()).map((x) => x.qid); }
+  async markSeen(userId, qid) { await this.s.updateOne({ userId, qid }, { $setOnInsert: { userId, qid, at: Date.now() } }, { upsert: true }); }
+  async resetSeen(userId) { await this.s.deleteMany({ userId }); }
   getUserByDevice(d) { return this.u.findOne({ deviceId: d }, { projection: { _id: 0 } }); }
   async addUserIfAbsent(user) {
-    await this.u.updateOne({ deviceId: user.deviceId }, { $setOnInsert: user }, { upsert: true });
+    try {
+      await this.u.updateOne({ deviceId: user.deviceId }, { $setOnInsert: user }, { upsert: true });
+    } catch (e) {
+      if (e && e.code === 11000) throw new HttpError(409, NAME_TAKEN);
+      throw e;
+    }
     return this.getUserByDevice(user.deviceId);
   }
   allUsers() { return this.u.find({}, { projection: { _id: 0 } }).toArray(); }
@@ -77,13 +99,21 @@ class FileStore {
     this.d.questions = this.d.questions || [];
     this.d.users = this.d.users || [];
     this.d.results = this.d.results || [];
+    this.d.seen = this.d.seen || {};
     console.warn("تحذير: لا يوجد MONGODB_URI، يتم الحفظ في ملف محلي وقد يُمسح عند إعادة تشغيل الخادم.");
   }
+  async seenIds(userId) { return this.d.seen[userId] || []; }
+  async markSeen(userId, qid) {
+    const a = (this.d.seen[userId] = this.d.seen[userId] || []);
+    if (!a.includes(qid)) { a.push(qid); this._save(); }
+  }
+  async resetSeen(userId) { delete this.d.seen[userId]; this._save(); }
   _save() { fs.writeFileSync(this.file, JSON.stringify(this.d)); }
   async getUserByDevice(d) { return this.d.users.find((u) => u.deviceId === d) || null; }
   async addUserIfAbsent(user) {
     const ex = this.d.users.find((u) => u.deviceId === user.deviceId);
     if (ex) return ex;
+    if (this.d.users.some((u) => (u.nameKey || nameKey(u.firstName, u.lastName)) === user.nameKey)) throw new HttpError(409, NAME_TAKEN);
     this.d.users.push(user); this._save(); return user;
   }
   async allUsers() { return this.d.users; }
@@ -123,14 +153,45 @@ async function handle(route, params, method, body) {
     const firstName = cleanStr(body.firstName, 30);
     const lastName = cleanStr(body.lastName, 30);
     if (firstName.length < 2 || lastName.length < 2)
-      throw new HttpError(400, "اكتب الاسم الأول والأخير (حرفان على الأقل لكل واحد)");
+      throw new HttpError(400, "اكتب الاسم الأول واسم العائلة (حرفان على الأقل لكل واحد)");
+    if (HAS_SPACE.test(firstName) || HAS_SPACE.test(lastName))
+      throw new HttpError(400, "يجب أن يكون الاسم الأول كلمة واحدة واسم العائلة كلمة واحدة، بدون مسافات");
+    const existingSelf = await db.getUserByDevice(body.deviceId);
+    if (existingSelf) return { user: userOut(existingSelf) };
+    const key = nameKey(firstName, lastName);
+    const taken = (await db.allUsers()).some((u) => (u.nameKey || nameKey(u.firstName, u.lastName)) === key);
+    if (taken) throw new HttpError(409, NAME_TAKEN);
     const user = await db.addUserIfAbsent({
-      id: crypto.randomUUID(), deviceId: body.deviceId, firstName, lastName, createdAt: Date.now(),
+      id: crypto.randomUUID(), deviceId: body.deviceId, firstName, lastName, nameKey: key, createdAt: Date.now(),
     });
     return { user: userOut(user) };
   }
 
-  if (route === "/count" && method === "GET") return { total: await db.countQuestions() };
+  if (route === "/count" && method === "GET") {
+    const total = await db.countQuestions();
+    let unseen = total;
+    const deviceId = params.get("deviceId");
+    if (validDevice(deviceId)) {
+      const user = await db.getUserByDevice(deviceId);
+      if (user) {
+        const ids = new Set((await db.allQuestions()).map((q) => String(q.id)));
+        const seen = (await db.seenIds(user.id)).filter((id) => ids.has(String(id)));
+        unseen = total - seen.length;
+      }
+    }
+    return { total, unseen };
+  }
+
+  // تسجيل أن المستخدم رأى سؤالًا (لا يتكرر عليه حتى ينهي كل الأسئلة)
+  if (route === "/seen" && method === "POST") {
+    if (!validDevice(body.deviceId)) throw new HttpError(400, "معرّف الجهاز غير صالح");
+    const user = await db.getUserByDevice(body.deviceId);
+    if (!user) throw new HttpError(404, "المستخدم غير مسجّل");
+    const qid = String(body.id || "");
+    if (!qid || qid.length > 64) throw new HttpError(400, "معرّف السؤال غير صالح");
+    await db.markSeen(user.id, qid);
+    return { ok: true };
+  }
 
   if (route === "/quiz" && method === "GET") {
     const all = await db.allQuestions();
@@ -138,11 +199,40 @@ async function handle(route, params, method, body) {
     if (!isInt(count) || count < 1) throw new HttpError(400, "عدد الأسئلة غير صالح");
     count = Math.min(count, all.length);
     if (count === 0) throw new HttpError(404, "لا توجد أسئلة في قاعدة البيانات بعد");
-    for (let i = all.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [all[i], all[j]] = [all[j], all[i]];
+    const shuffle = (arr) => {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    };
+    // الأسئلة التي لم يرها هذا المستخدم بعد تأتي أولًا؛ لا تُكرَّر عليه حتى ينتهي من كل الأسئلة
+    let unseen = all;
+    let reset = false;
+    const deviceId = params.get("deviceId");
+    const user = validDevice(deviceId) ? await db.getUserByDevice(deviceId) : null;
+    if (user) {
+      let seen = new Set((await db.seenIds(user.id)).map(String));
+      unseen = all.filter((q) => !seen.has(String(q.id)));
+      if (unseen.length === 0) {
+        await db.resetSeen(user.id); // أنهى كل الأسئلة: نبدأ دورة جديدة
+        unseen = all;
+        reset = true;
+      }
     }
-    return { questions: all.slice(0, count).map((d) => ({ id: String(d.id), q: d.q, options: d.options, correct: d.correct })) };
+    shuffle(unseen);
+    let picked = unseen.slice(0, count);
+    if (picked.length < count) {
+      // الجديد لا يكفي العدد المطلوب: نكمّل بأسئلة سبق أن رآها (تكرار مقبول لأن الأسئلة انتهت)
+      const have = new Set(picked.map((q) => String(q.id)));
+      picked = picked.concat(shuffle(all.filter((q) => !have.has(String(q.id)))).slice(0, count - picked.length));
+    }
+    shuffle(picked);
+    return {
+      questions: picked.map((d) => ({ id: String(d.id), q: d.q, options: d.options, correct: d.correct })),
+      fresh: Math.min(unseen.length, count),
+      newRound: reset,
+    };
   }
 
   if (route === "/import" && method === "POST") {

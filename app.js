@@ -90,27 +90,35 @@
   }
 
   // ---------- إدخال الاسم ----------
-  function viewWelcome(msg) {
+  function viewWelcome(msg, prev) {
+    prev = prev || { f: "", l: "" };
     show(`
       <h1>أهلاً بك</h1>
-      <p class="muted">قبل أن نبدأ، عرّفنا باسمك.</p>
+      <p class="muted">قبل أن نبدأ، عرّفنا باسمك: كلمة واحدة للاسم الأول وكلمة واحدة لاسم العائلة (بدون مسافات)، ولا يمكن أن يتطابق اسمك مع اسم مستخدم آخر.</p>
       <form id="f" class="card stack">
-        <div><label for="fn">الاسم الأول</label><input id="fn" type="text" maxlength="30" autocomplete="given-name"></div>
-        <div><label for="ln">اسم العائلة</label><input id="ln" type="text" maxlength="30" autocomplete="family-name"></div>
+        <div><label for="fn">الاسم الأول</label><input id="fn" type="text" maxlength="30" autocomplete="given-name" value="${esc(prev.f)}"></div>
+        <div><label for="ln">اسم العائلة</label><input id="ln" type="text" maxlength="30" autocomplete="family-name" value="${esc(prev.l)}"></div>
         ${msg ? `<div class="err">${esc(msg)}</div>` : ""}
         <button class="big" type="submit">متابعة</button>
       </form>`);
+    for (const id of ["fn", "ln"]) {
+      $(id).addEventListener("input", (ev) => {
+        const c = ev.target.value.replace(/[\s\u200B-\u200F\u2060\uFEFF]/g, "");
+        if (c !== ev.target.value) ev.target.value = c;
+      });
+    }
     $("f").onsubmit = async (e) => {
       e.preventDefault();
       const firstName = $("fn").value.trim();
       const lastName = $("ln").value.trim();
-      if (firstName.length < 2 || lastName.length < 2) return viewWelcome("اكتب الاسم الأول واسم العائلة");
+      if (firstName.length < 2 || lastName.length < 2) return viewWelcome("اكتب الاسم الأول واسم العائلة (حرفان على الأقل لكل واحد)", { f: firstName, l: lastName });
+      if (/[\s\u200B-\u200F\u2060\uFEFF]/.test(firstName + lastName)) return viewWelcome("الاسم الأول كلمة واحدة واسم العائلة كلمة واحدة، بدون مسافات", { f: firstName, l: lastName });
       try {
         const r = await api("/register", { deviceId: deviceId(), firstName, lastName });
         user = r.user;
         viewHome();
       } catch (err) {
-        viewWelcome(err.message);
+        viewWelcome(err.message, { f: firstName, l: lastName });
       }
     };
   }
@@ -133,9 +141,11 @@
   // ---------- اختيار عدد الأسئلة ----------
   async function viewSetup() {
     show('<p class="muted center">جارٍ التحميل…</p>');
-    let total;
+    let total, unseen;
     try {
-      total = (await api("/count")).total;
+      const c = await api("/count?deviceId=" + encodeURIComponent(deviceId()));
+      total = c.total;
+      unseen = c.unseen;
     } catch (e) {
       show(`<div class="card stack"><div class="err">${esc(e.message)}</div><button id="b">رجوع</button></div>`);
       $("b").onclick = viewHome;
@@ -150,7 +160,8 @@
     const presets = PRESETS.filter((p) => p <= total);
     show(`
       <h2>كم سؤالًا تريد؟</h2>
-      <p class="muted">المتوفر في قاعدة الأسئلة: ${nf(total)} سؤال</p>
+      <p class="muted">المتوفر في قاعدة الأسئلة: ${nf(total)} سؤال${unseen < total ? ` — بقي لك ${nf(unseen)} سؤال لم يظهر لك من قبل` : ""}</p>
+      ${unseen === 0 ? '<p class="muted">أنهيت كل الأسئلة! ستبدأ دورة جديدة وتظهر الأسئلة من جديد.</p>' : ""}
       <div class="card stack">
         <div class="chips" id="chips">${presets.map((p) => `<button class="chip" data-n="${p}">${nf(p)}</button>`).join("")}
           ${presets.includes(total) ? "" : `<button class="chip" data-n="${total}">الكل (${nf(total)})</button>`}</div>
@@ -181,7 +192,7 @@
       $("go").disabled = true;
       $("go").textContent = "جارٍ تجهيز الأسئلة…";
       try {
-        const r = await api("/quiz?count=" + count);
+        const r = await api("/quiz?count=" + count + "&deviceId=" + encodeURIComponent(deviceId()));
         startQuiz(r.questions, count);
       } catch (e) {
         $("msg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
@@ -211,6 +222,8 @@
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
+    // نسجّل على الخادم أن هذا السؤال ظهر لك حتى لا يتكرر مستقبلًا
+    api("/seen", { deviceId: deviceId(), id: q.id }).catch(() => {});
     S.order = order; // order[موضع معروض] = فهرس الخيار الأصلي
     const left = S.qs.length - S.i;
     const pct = (S.i / S.qs.length) * 100;
