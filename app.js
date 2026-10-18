@@ -205,12 +205,29 @@
   // ---------- الاختبار ----------
   let S = null;
 
+  const nowMs = () => performance.now();
+  function curElapsed() { return S.curMs + (S.segStart != null ? nowMs() - S.segStart : 0); }
+  function totalNow() { return S.doneMs + (S.locked ? 0 : curElapsed()); }
+  function pauseClock() {
+    if (S && S.segStart != null) { S.curMs += nowMs() - S.segStart; S.segStart = null; }
+  }
+  function resumeClock() {
+    if (S && !S.locked && S.segStart == null && document.visibilityState === "visible" && document.hasFocus()) S.segStart = nowMs();
+  }
+  // إذا خرجت من التطبيق أو انتقلت لتبويب/نافذة أخرى يتوقف الوقت، ويعود عند رجوعك
+  document.addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? resumeClock() : pauseClock()));
+  window.addEventListener("blur", pauseClock);
+  window.addEventListener("focus", resumeClock);
+  window.addEventListener("pagehide", pauseClock);
+
   function startQuiz(qs, requested) {
-    S = { qs, requested, i: 0, correct: 0, answered: 0, start: performance.now(), qStart: 0, locked: false };
+    // الوقت العادل: يُحسب فقط أثناء ظهور السؤال بدون إجابة والتطبيق أمامك.
+    // doneMs = مجموع أوقات الأسئلة التي أجبت عنها، curMs = وقت السؤال الحالي، segStart = بداية الفترة الجارية (null = متوقف)
+    S = { qs, requested, i: 0, correct: 0, answered: 0, doneMs: 0, curMs: 0, segStart: null, locked: true };
     renderQuestion();
     timerHandle = setInterval(() => {
       const t = $("tot");
-      if (t) t.textContent = fmtTime(performance.now() - S.start);
+      if (t && S) t.textContent = fmtTime(totalNow());
     }, 500);
   }
 
@@ -231,7 +248,7 @@
     app.innerHTML = `
       <div class="topbar">
         <span class="pill">المتبقي: ${nf(left)}</span>
-        <span class="pill" id="tot">${fmtTime(performance.now() - S.start)}</span>
+        <span class="pill" id="tot">${fmtTime(totalNow())}</span>
         <button class="ghost" id="fin" style="padding:6px 14px">إنهاء</button>
       </div>
       <div class="bar"><i style="width:${pct}%"></i></div>
@@ -243,7 +260,9 @@
       </div>`;
     timerHandle = keepTimer;
     S.locked = false;
-    S.qStart = performance.now();
+    S.curMs = 0;
+    S.segStart = null;
+    resumeClock();
     $("opts").onclick = (e) => {
       const b = e.target.closest(".opt");
       if (b) answer(Number(b.dataset.k));
@@ -258,8 +277,10 @@
 
   function answer(k) {
     if (S.locked) return;
+    pauseClock(); // بعد الإجابة يتوقف الوقت حتى ينتقل للسؤال التالي
     S.locked = true;
-    const took = performance.now() - S.qStart;
+    const took = S.curMs;
+    S.doneMs += took;
     const q = S.qs[S.i];
     const ok = S.order[k] === q.correct - 1;
     S.answered++;
@@ -268,12 +289,13 @@
     btns.forEach((b) => (b.disabled = true));
     btns[k].classList.add(ok ? "ok" : "bad");
     if (!ok) btns[S.order.indexOf(q.correct - 1)].classList.add("ok");
-    $("tl").textContent = `استغرقت ${fmtSec(took)} ثانية في هذا السؤال`;
+    $("tl").textContent = `استغرقت ${fmtSec(took)} ثانية في هذا السؤال (الوقت متوقف حتى تضغط التالي)`;
     $("next").disabled = false;
   }
 
   async function finish(early) {
-    const totalMs = performance.now() - S.start;
+    pauseClock();
+    const totalMs = S.doneMs; // فقط أوقات الأسئلة التي أُجيب عنها فعليًا
     const r = { requested: S.requested, answered: S.answered, correct: S.correct, totalTimeMs: Math.round(totalMs), finishedEarly: early };
     stopTimer();
     const wrong = r.answered - r.correct;
